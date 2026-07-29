@@ -1,35 +1,39 @@
 Spent three hours on Tuesday cleaning up a mess in floor 3's IDF because someone plugged an unmanaged Netgear switch into an access drop, bridged two jacks together, and knocked out the whole stack.
-Every junior admin gets told L2 frames don't have TTLs, but until you see a 2960X backplane choke on a broadcast storm because MAC tables are flushing every 100ms, it doesn't click. If you leave access ports on factory defaults, someone brings in a rogue SOHO router or runs Scapy on a laptop, sends a single BPDU with priority 0, and suddenly your core switch isn't root anymore. All VLAN traffic starts hairpining down to an 8-port desktop switch under someone's desk.
-If they plug the LAN side of a home router into the wall, it starts handing out 192.168.1.0/24 addresses faster than our Windows DHCP server can even see the DISCOVER packets. Plus, if you're running OSPF down to the access layer without passive interfaces, that cheap router advertises 0.0.0.0/0 with a metric of 0 and sucks all your egress traffic straight away from the Palo Alto.
+Every junior admin gets told L2 frames don't have TTLs, but until you see a 2960X backplane choke on a broadcast storm because MAC tables are flushing every 100ms, it doesn't click. If you leave access ports on factory defaults, 
+someone brings in a rogue SOHO router or runs Scapy on a laptop, sends a single BPDU with priority 0, and suddenly your core switch isn't root anymore. All VLAN traffic starts hairpining down to an 8-port desktop switch under someone's desk.
+If they plug the LAN side of a home router into the wall, it starts handing out 192.168.1.0/24 addresses faster than our Windows DHCP server can even see the DISCOVER packets.
+Plus, if you're running OSPF down to the access layer without passive interfaces, that cheap router advertises 0.0.0.0/0 with a metric of 0 and sucks all your egress traffic straight away from the Palo Alto.
 Here's what we actually drop on the access switches now to keep the helpdesk from calling at 2 AM.
 First, lock down OSPF so user drops can't form adjacencies:
-Plaintext
+
 
 Core-SW(config)# router ospf 1
 Core-SW(config-router)# passive-interface default
 Core-SW(config-router)# no passive-interface Gi0/1
-Then enable DHCP snooping. Note on this: if you're still running ancient 15.x IOS images on legacy Catalyst boxes, test option 82 handling first. Old code used to choke and drop legit requests if no ip dhcp snooping information option wasn't set on the switch.
-Plaintext
+Then enable DHCP snooping. Note on this: if you're still running ancient 15.x IOS images on legacy Catalyst boxes, test option 82 handling first.
+Old code used to choke and drop legit requests if no ip dhcp snooping information option wasn't set on the switch.
+
 
 SW-Access-01(config)# ip dhcp snooping
 SW-Access-01(config)# ip dhcp snooping vlan 10,20
 SW-Access-01(config)# int gi0/1
 SW-Access-01(config-if)# ip dhcp snooping trust
 To keep the root bridge where it belongs:
-Plaintext
+
 
 SW-Core-Primary(config)# span vlan 10 prio 4096
 SW-Core-Backup(config)# span vlan 10 prio 8192
 On access ranges, slap on BPDU guard.
-Plaintext
+
 
 SW-Access-01(config)# int range fa0/1 - 24
 SW-Access-01(config-if-range)# switchport mode access
 SW-Access-01(config-if-range)# span portfast
 SW-Access-01(config-if-range)# span bpduguard enable
-Word of warning on BPDU guard—watch out for Polycom or Cisco IP phones with PC pass-through ports. If a user bridges the phone's secondary port back into a secondary wall drop, BPDU guard nukes the port instantly. You end up killing their phone along with their PC, and then level 1 support doesn't know why the port went into err-disabled state.
+Word of warning on BPDU guard—watch out for Polycom or Cisco IP phones with PC pass-through ports. If a user bridges the phone's secondary port back into a secondary wall drop, BPDU guard nukes the port instantly.
+You end up killing their phone along with their PC, and then level 1 support doesn't know why the port went into err-disabled state.
 When a port trips, don't bother remoting in to shut / no shut it every single time. Set up auto-recovery:
-Plaintext
+
 
 SW-Access-01(config)# errdisable recovery cause bpduguard
 SW-Access-01(config)# errdisable recovery interval 300
